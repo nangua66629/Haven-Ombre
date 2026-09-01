@@ -651,9 +651,9 @@ class ChatGptOAuthProvider:
         return bool(token) and hmac.compare_digest(token, self.refresh_token)
 
 
-_oauth_state_dir = config.get("state_dir") or os.path.join(
-    os.path.dirname(os.path.abspath(config.get("buckets_dir", "buckets"))),
-    "state",
+_oauth_state_dir = os.environ.get("OMBRE_OAUTH_STATE_DIR") or os.path.join(
+    os.path.abspath(config.get("buckets_dir", "buckets")),
+    ".private",
 )
 OMBRE_CHATGPT_OAUTH = DynamicOAuthProvider(
     state_dir=_oauth_state_dir,
