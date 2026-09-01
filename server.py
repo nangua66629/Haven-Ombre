@@ -124,6 +124,7 @@ from persona_engine import PersonaStateEngine
 from persona_event_selection import select_persona_events
 from portrait_engine import DailyPortraitMaintainer
 from raw_events import RawEventStore
+from oauth_dynamic import DynamicOAuthProvider
 from reflection_engine import ReflectionEngine
 from recall_diagnostics import RecallDiagnosticsLogger
 from reminder_store import ReminderStore
@@ -650,23 +651,20 @@ class ChatGptOAuthProvider:
         return bool(token) and hmac.compare_digest(token, self.refresh_token)
 
 
-OMBRE_CHATGPT_OAUTH = ChatGptOAuthProvider(
-    client_id=os.environ.get("OMBRE_CHATGPT_OAUTH_CLIENT_ID", ""),
-    client_secret=os.environ.get("OMBRE_CHATGPT_OAUTH_CLIENT_SECRET", ""),
-    access_token=os.environ.get("OMBRE_CHATGPT_OAUTH_ACCESS_TOKEN", ""),
-    refresh_token=os.environ.get("OMBRE_CHATGPT_OAUTH_REFRESH_TOKEN", ""),
+_oauth_state_dir = os.environ.get("OMBRE_OAUTH_STATE_DIR") or os.path.join(
+    os.path.abspath(config.get("buckets_dir", "buckets")),
+    ".private",
+)
+OMBRE_CHATGPT_OAUTH = DynamicOAuthProvider(
+    state_dir=_oauth_state_dir,
     public_base_url=os.environ.get("OMBRE_CHATGPT_OAUTH_PUBLIC_BASE_URL", ""),
-    redirect_prefix=os.environ.get(
-        "OMBRE_CHATGPT_OAUTH_REDIRECT_PREFIX",
-        DEFAULT_CHATGPT_OAUTH_REDIRECT_PREFIX,
-    ),
-    redirect_uris=_split_csv(
-        os.environ.get(
-            "OMBRE_CHATGPT_OAUTH_REDIRECT_URIS",
-            DEFAULT_CLAUDE_OAUTH_REDIRECT_URI,
-        )
-    ),
-    token_ttl_seconds=_int_env("OMBRE_CHATGPT_OAUTH_TOKEN_TTL_SECONDS", 30 * 24 * 60 * 60),
+    fixed_client_id=os.environ.get("OMBRE_CHATGPT_OAUTH_CLIENT_ID", ""),
+    fixed_client_secret=os.environ.get("OMBRE_CHATGPT_OAUTH_CLIENT_SECRET", ""),
+    fixed_access_token=os.environ.get("OMBRE_CHATGPT_OAUTH_ACCESS_TOKEN", ""),
+    fixed_refresh_token=os.environ.get("OMBRE_CHATGPT_OAUTH_REFRESH_TOKEN", ""),
+    dynamic_enabled=str(
+        os.environ.get("OMBRE_CHATGPT_OAUTH_DYNAMIC", "true")
+    ).strip().lower() not in {"0", "false", "no", "off"},
 )
 
 
@@ -693,6 +691,8 @@ def _oauth_public_path(path: str) -> bool:
         "/.well-known/openid-configuration",
         "/mcp/oauth/authorize",
         "/mcp/oauth/token",
+        "/oauth/register",
+        "/mcp/oauth/register",
         "/mcp/.well-known/oauth-authorization-server",
         "/mcp/.well-known/oauth-protected-resource",
         "/mcp/.well-known/openid-configuration",
@@ -744,7 +744,7 @@ def _oauth_success_payload() -> dict:
 
 
 class OmbreChatGptOAuthMiddleware:
-    def __init__(self, app, provider: ChatGptOAuthProvider, protected_hosts: set[str]) -> None:
+    def __init__(self, app, provider: DynamicOAuthProvider, protected_hosts: set[str]) -> None:
         self.app = app
         self.provider = provider
         self.protected_hosts = {host.lower() for host in protected_hosts}
@@ -775,13 +775,13 @@ class OmbreChatGptOAuthMiddleware:
         response = JSONResponse(
             {"error": "invalid_token"},
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer realm="Ombre Brain"'},
+            headers={"WWW-Authenticate": self.provider.challenge_for_scope(scope)},
         )
         await response(scope, receive, send)
 
     def _is_protected_host(self, scope) -> bool:
         if not self.protected_hosts:
-            return False
+            return True
         host = ""
         for key, value in scope.get("headers", []):
             if key.lower() == b"host":
@@ -840,75 +840,33 @@ def _dashboard_setup_needed() -> bool:
     return _load_dashboard_password_hash() is None
 
 
-@mcp.custom_route("/oauth/authorize", methods=["GET"])
-@mcp.custom_route("/mcp/oauth/authorize", methods=["GET"])
+@mcp.custom_route("/oauth/register", methods=["POST"])
+@mcp.custom_route("/mcp/oauth/register", methods=["POST"])
+async def chatgpt_oauth_register(request):
+    """Dynamically register a ChatGPT/Codex MCP OAuth client."""
+    return await OMBRE_CHATGPT_OAUTH.register(request)
+
+
+@mcp.custom_route("/oauth/authorize", methods=["GET", "POST"])
+@mcp.custom_route("/mcp/oauth/authorize", methods=["GET", "POST"])
 async def chatgpt_oauth_authorize(request):
-    from starlette.responses import RedirectResponse
-
-    if not OMBRE_CHATGPT_OAUTH.enabled:
-        return _oauth_error("oauth_not_configured", 404)
-
-    params = request.query_params
-    client_id = params.get("client_id")
-    redirect_uri = params.get("redirect_uri")
-    response_type = params.get("response_type")
-    state = params.get("state")
-
-    if response_type != "code":
-        return _oauth_error("unsupported_response_type")
-    if not OMBRE_CHATGPT_OAUTH.valid_client_id(client_id):
-        return _oauth_error("invalid_client", 401)
-    if not OMBRE_CHATGPT_OAUTH.valid_redirect_uri(redirect_uri):
-        return _oauth_error("invalid_redirect_uri")
-
-    code = OMBRE_CHATGPT_OAUTH.create_authorization_code(redirect_uri)
-    query = {"code": code}
-    if state:
-        query["state"] = state
-    separator = "&" if "?" in redirect_uri else "?"
-    return RedirectResponse(url=f"{redirect_uri}{separator}{urlencode(query)}", status_code=302)
+    """Authorize a registered client with the existing Dashboard password."""
+    return await OMBRE_CHATGPT_OAUTH.authorize(
+        request,
+        verify_password=_verify_dashboard_password,
+        setup_needed=_dashboard_setup_needed,
+    )
 
 
 @mcp.custom_route("/oauth/token", methods=["POST"])
 @mcp.custom_route("/mcp/oauth/token", methods=["POST"])
 async def chatgpt_oauth_token(request):
-    if not OMBRE_CHATGPT_OAUTH.enabled:
-        return _oauth_error("oauth_not_configured", 404)
-
-    form = await _oauth_form(request)
-    basic_client_id, basic_client_secret = _basic_client_credentials(request.headers)
-    client_id = basic_client_id or form.get("client_id")
-    client_secret = basic_client_secret or form.get("client_secret")
-
-    if not OMBRE_CHATGPT_OAUTH.valid_client_id(client_id):
-        return _oauth_error("invalid_client", 401)
-    if not OMBRE_CHATGPT_OAUTH.valid_client_secret(client_secret):
-        return _oauth_error("invalid_client", 401)
-
-    grant_type = form.get("grant_type")
-    if grant_type == "authorization_code":
-        if not OMBRE_CHATGPT_OAUTH.consume_authorization_code(form.get("code"), form.get("redirect_uri")):
-            return _oauth_error("invalid_grant")
-    elif grant_type == "refresh_token":
-        if not OMBRE_CHATGPT_OAUTH.valid_refresh_token(form.get("refresh_token")):
-            return _oauth_error("invalid_grant")
-    else:
-        return _oauth_error("unsupported_grant_type")
-
-    from starlette.responses import JSONResponse
-    return JSONResponse(_oauth_success_payload())
+    """Exchange an authorization code or refresh token."""
+    return await OMBRE_CHATGPT_OAUTH.token(request)
 
 
 def _oauth_server_metadata(request) -> dict:
-    base = OMBRE_CHATGPT_OAUTH.external_base(request)
-    return {
-        "issuer": base,
-        "authorization_endpoint": f"{base}/oauth/authorize",
-        "token_endpoint": f"{base}/oauth/token",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
-        "token_endpoint_auth_methods_supported": OMBRE_CHATGPT_OAUTH.token_auth_methods,
-    }
+    return OMBRE_CHATGPT_OAUTH.server_metadata(request)
 
 
 @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
@@ -918,9 +876,7 @@ def _oauth_server_metadata(request) -> dict:
 async def chatgpt_oauth_metadata(request):
     from starlette.responses import JSONResponse
 
-    if not OMBRE_CHATGPT_OAUTH.enabled:
-        return _oauth_error("oauth_not_configured", 404)
-    return JSONResponse(_oauth_server_metadata(request))
+    return JSONResponse(OMBRE_CHATGPT_OAUTH.server_metadata(request))
 
 
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
@@ -928,17 +884,7 @@ async def chatgpt_oauth_metadata(request):
 async def chatgpt_oauth_resource_metadata(request):
     from starlette.responses import JSONResponse
 
-    if not OMBRE_CHATGPT_OAUTH.enabled:
-        return _oauth_error("oauth_not_configured", 404)
-    base = OMBRE_CHATGPT_OAUTH.external_base(request)
-    return JSONResponse(
-        {
-            "resource": f"{base}/mcp",
-            "authorization_servers": [base],
-            "bearer_methods_supported": ["header"],
-        }
-    )
-
+    return JSONResponse(OMBRE_CHATGPT_OAUTH.resource_metadata(request))
 
 def _verify_dashboard_password(password: str) -> bool:
     env_password = os.environ.get("OMBRE_DASHBOARD_PASSWORD", "")

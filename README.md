@@ -355,7 +355,15 @@ OMBRE_DASHBOARD_PASSWORD=...
 http(s)://your-host/ombre/mcp
 ```
 
-具体路径取决于反向代理。ChatGPT / Claude Connector OAuth 需要额外配置 `OMBRE_CHATGPT_OAUTH_*`。客户端工具说明与推荐调用方式见 [`docs/Tool Guide.md`](docs/Tool%20Guide.md)。
+具体路径取决于反向代理。ChatGPT / Codex Connector 默认使用 OAuth 2.1 动态客户端注册（DCR）与 S256 PKCE；不需要手工生成固定 client_id 或 access token。部署时应配置 Dashboard 密码，并建议显式设置公网基址：
+
+```dotenv
+OMBRE_DASHBOARD_PASSWORD=...
+OMBRE_CHATGPT_OAUTH_DYNAMIC=true
+OMBRE_CHATGPT_OAUTH_PUBLIC_BASE_URL=https://your-host
+```
+
+动态注册的客户端与令牌保存在挂载数据目录的 `.private/.mcp_oauth_state.json`，容器重建后仍可刷新；不要把该私密目录提交或同步到 GitHub。若必须兼容旧固定客户端，原有的 `OMBRE_CHATGPT_OAUTH_CLIENT_ID` / `ACCESS_TOKEN` 等变量仍可使用。客户端工具说明与推荐调用方式见 [`docs/Tool Guide.md`](docs/Tool%20Guide.md)。
 
 ### OpenAI-compatible 客户端
 
