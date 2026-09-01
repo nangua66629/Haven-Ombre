@@ -2,9 +2,9 @@
 
 这份文档用于把 Ombre-Brain 接给 Operit、RikkaHub、ChatGPT MCP、Claude Connector 或其它聊天平台时，直接粘贴到平台指令里。
 
-## 当前 MCP 工具（19 个）
+## 当前 MCP 工具（20 个）
 
-- 读取与盘点：`breath`、`read_bucket`、`list_buckets_light`、`pulse`、`introspection`
+- 读取与盘点：`breath`、`raw_search`、`read_bucket`、`list_buckets_light`、`pulse`、`introspection`
 - 写入与维护记忆：`hold`、`grow`、`comment_bucket`、`delete_bucket_comment`、`trace`、`profile_fact`
 - 照顾备忘：`reminder_create`、`reminder_list`、`reminder_update`
 - 暗房：`darkroom_enter`、`darkroom_rooms`、`darkroom_delete`、`darkroom_view`
@@ -19,6 +19,7 @@
 - 新窗口/醒来/换窗：breath(mode="handoff")。
 - 新窗口第一轮，即使用户直接问“昨天/昨晚/前天/记不记得昨天/昨天做了什么/昨天聊了什么”：先 breath(mode="handoff") 恢复身份和生活背景；细节不够时再 breath(query="日期 + 主题")。
 - 还记得/之前/某个暗号/项目/偏好/边界：breath(query="关键词或原句")。
+- 用户明确要查“当时具体怎么说”“聊天原句”或某个窗口/日期的原文：用 raw_search(query="关键词", conversation_id="可选窗口 ID", since="可选起始时间", until="可选结束时间")。它只搜索已写入 raw_events 的 user/assistant 原文，不会搜索 bucket 摘要，也不会自动注入。
 - 如果想查明确日期的具体普通记忆：breath(date="YYYY-MM-DD") 或 breath(query="YYYY-MM-DD + 主题")。支持 2026-06-15、2026.06.15、2026年6月15日、25年6月15日、6月15日；没有年份的“6月15日”默认按今年查。
 - 日期查询优先看 bucket 的事件日期 date；没有 date 的旧桶才回退看 created/updated_at/last_active。带了 date 的桶不会因为创建日期误入别的日期。
 - 日印象不会混进普通日期查询；想读日印象必须显式 breath(domain="daily_impression")，也可以加 date，例如 breath(domain="daily_impression", date="2026-06-15")。
@@ -71,6 +72,7 @@
 - 不要把新窗口信号写成 breath(query="新窗口")。
 - 不要把“刚刚/刚才”当长期记忆查询。
 - 不要把 `[memory_detail ...]` 当 MCP 工具调用。
+- 不要空参数调用 raw_search；必须提供关键词、conversation_id、session_id 或日期范围之一。
 - 不要调用文档外猜出来的工具名；续写暗房前用 darkroom_rooms 找房间，写入仍用 darkroom_enter(new_room=false)。
 - 不要用裸 breath(query="self_anchor") 读自我；它会被拦住，避免普通搜索误触。
 - self_anchor 独立于普通 anchor / pinned / profile_fact；只有 handoff 或显式 self_anchor 读取会带出，Gateway 普通自动注入不会带它。
