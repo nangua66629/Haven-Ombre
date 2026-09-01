@@ -14,6 +14,8 @@
 #     暴露 MCP 工具：
 #       breath — Surface unresolved memories or search by keyword
 #                浮现未解决记忆 或 按关键词检索
+#       raw_search — Explicitly search archived dialogue originals
+#                    显式检索已存档的聊天原文
 #       resurface — Surface dormant memories without touching them
 #                   只读浮现久未触碰的旧记忆
 #       comment_bucket — Add a ring comment to a memory
