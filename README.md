@@ -431,6 +431,8 @@ curl -sS -b ombre.cookies -G \
 
 `/api/search-raw` 同时支持 GET 与 JSON POST，可用 `source`、`role`、`conversation_id`、`session_id`、`since`、`until` 过滤。`q` 留空时返回过滤范围内的最近原文。
 
+聊天客户端也可通过只读 MCP 工具 `raw_search` 使用同一原文库。为避免无意中宽泛读取，MCP 调用必须提供 `query`、`conversation_id`、`session_id`、`since` 或 `until` 中至少一项；结果不会参与普通 `breath`、向量召回或自动注入。
+
 ### Claude Code / Codex Hook 端点
 
 Brain 提供会话启动用的紧凑 handoff 文本：
@@ -479,6 +481,7 @@ Codex 接线时注意：
 | `grow` | 写入或合并长期记忆 |
 | `hold` | 暂存当前值得抓住的片段 |
 | `read_bucket` | 读取指定 bucket 原文 |
+| `raw_search` | 显式检索已写入原文保险箱的聊天原句；需提供关键词、窗口 ID 或日期范围 |
 | `comment_bucket` / `delete_bucket_comment` | 添加或删除年轮 |
 | `profile_fact` | 管理带证据的画像事实 |
 | `reminder_create/list/update` | 管理独立照顾备忘 |
