@@ -8007,6 +8007,58 @@ async def read_bucket(bucket_id: str) -> dict:
 
 
 # =============================================================
+# Tool 1.52: raw_search — explicitly search the raw dialogue archive
+# 工具 1.52：raw_search — 显式检索聊天原文
+# =============================================================
+@mcp.tool()
+async def raw_search(
+    query: str = "",
+    limit: int = 10,
+    source: str = "",
+    role: str = "",
+    conversation_id: str = "",
+    session_id: str = "",
+    since: str = "",
+    until: str = "",
+) -> dict:
+    """显式搜索已存档的 user/assistant 聊天原文；不参与普通 breath、向量召回或自动注入。必须提供关键词、窗口 ID 或日期范围之一。"""
+    cleaned_query = str(query or "").strip()
+    cleaned_conversation_id = str(conversation_id or "").strip()
+    cleaned_session_id = str(session_id or "").strip()
+    cleaned_since = str(since or "").strip()
+    cleaned_until = str(until or "").strip()
+    if not any(
+        (
+            cleaned_query,
+            cleaned_conversation_id,
+            cleaned_session_id,
+            cleaned_since,
+            cleaned_until,
+        )
+    ):
+        return {
+            "error": "query, conversation_id, session_id, since, or until is required",
+            "count": 0,
+            "items": [],
+        }
+
+    try:
+        return raw_event_store.search(
+            query=cleaned_query,
+            limit=_int_between(limit, 10, 1, 50),
+            source=str(source or "").strip(),
+            role=str(role or "").strip(),
+            conversation_id=cleaned_conversation_id,
+            session_id=cleaned_session_id,
+            since=cleaned_since,
+            until=cleaned_until,
+        )
+    except Exception as exc:
+        logger.warning("MCP raw search failed: %s", exc)
+        return {"error": str(exc), "count": 0, "items": []}
+
+
+# =============================================================
 # Tool 1.55: list_buckets_light — lightweight bucket index
 # 工具 1.55：list_buckets_light — 轻量桶索引
 # =============================================================
